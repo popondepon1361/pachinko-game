@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Pachinko Game - Closing Performance & Adjusted Physics</title>
+  <style>
+    body {
+      background: #121216;
+      color: #fff;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 10px;
+    }
+    #gameContainer {
+      display: inline-block;
+      position: relative;
+      background: #1a1a24;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.8);
+    }
+    .lang-selector {
+      margin-bottom: 10px;
+      text-align: right;
+    }
+    .lang-selector select {
+      background: #2a2a3a;
+      color: #fff;
+      border: 1px solid #444466;
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    canvas {
+      background: #080810;
+      border-radius: 6px;
+      display: block;
+    }
+    .controls {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      padding: 8px 18px;
+      font-size: 14px;
+      font-weight: bold;
+      background: #00d2ff;
+      color: #000;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #50e3c2;
+    }
+    .stop-btn {
+      background: #ff0055;
+      color: #fff;
+      min-width: 60px;
+    }
+    .stop-btn:disabled {
+      background: #444;
+      color: #888;
+      cursor: not-allowed;
+    }
+    /* Modal style for Game Over overlay */
+    #gameOverOverlay {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      border-radius: 12px;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+    #gameOverBtn {
+      background: #ff0055;
+      color: #ffffff;
+      font-size: 32px;
+      font-weight: bold;
+      padding: 20px 40px;
+      border: 3px solid #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 0 20px #ff0055;
+      cursor: pointer;
+    }
+    #gameOverBtn:hover {
+      background: #ff3300;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="gameContainer">
+    <div id="gameOverOverlay">
+      <button id="gameOverBtn" onclick="location.reload();">ゲームオーバー</button>
+    </div>
+
+    <div class="lang-selector">
+      <select id="langSelect">
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="ko">한국어</option>
+        <option value="hi">हिन्दी</option>
+        <option value="ar">العربية</option>
+        <option value="ru">Русский</option>
+      </select>
+    </div>
+    <canvas id="gameCanvas" width="550" height="750"></canvas>
+    <div class="controls">
+      <button id="launchBtn">単発発射 (Space / ボタン短押し)</button>
+      <div class="btn-row">
+        <button id="stopCol0" class="stop-btn" disabled>左</button>
+        <button id="stopCol1" class="stop-btn" disabled>中</button>
+        <button id="stopCol2" class="stop-btn" disabled>右</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Made by AI with pon
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const i18n = {
+  ja: {
+    launchBtn: "単発発射 (Space / ボタン短押し)",
+    stopLeft: "左", stopMid: "中", stopRight: "右",
+    dataLamp: "データランプ", visitor: "訪問者", jackpot: "大当り", balls: "持ち玉", lastWin: "直近獲得",
+    payoutTitle: "【配当表】", payoutChacker: "チャッカー入賞: +3", payoutMatch: "図柄揃い: +15", payoutFever: "777大当り: +50",
+    call: "呼出", upperTray: "上皿", borrow: "玉貸", returnBtn: "返却", lowerTray: "下皿",
+    closingMsg: "またのご来店をお待ちしております"
+  },
+  en: {
+    launchBtn: "Launch Ball (Space / Click)",
+    stopLeft: "L", stopMid: "M", stopRight: "R",
+    dataLamp: "DATA LAMP", visitor: "VISITOR", jackpot: "JACKPOT", balls: "BALLS", lastWin: "LAST WIN",
+    payoutTitle: "[PAYOUT]", payoutChacker: "Chacker Entry: +3", payoutMatch: "3-of-a-Kind: +15", payoutFever: "777 Jackpot: +50",
+    call: "CALL", upperTray: "Upper Tray", borrow: "Get Balls", returnBtn: "Return", lowerTray: "Lower Tray",
+    closingMsg: "Thank you for visiting! We look forward to seeing you again."
+  },
+  zh: {
+    launchBtn: "单发射击 (空格键 / 点击)",
+    stopLeft: "左", stopMid: "中", stopRight: "右",
+    dataLamp: "数据灯", visitor: "访客数", jackpot: "大奖", balls: "持有球", lastWin: "最近获得",
+    payoutTitle: "【赔率表】", payoutChacker: "入赏口: +3", payoutMatch: "图案组合: +15", payoutFever: "777大奖: +50",
+    call: "呼叫", upperTray: "上盘", borrow: "借球", returnBtn: "退球", lowerTray: "下盘",
+    closingMsg: "感谢您的光临，期待您的再次光临！"
+  },
+  es: {
+    launchBtn: "Lanzar Bola (Espacio / Clic)",
+    stopLeft: "I", stopMid: "C", stopRight: "D",
+    dataLamp: "PANEL", visitor: "VISITA", jackpot: "PREMIO", balls: "BOLAS", lastWin: "ÚLTIMO",
+    payoutTitle: "[TABLA]", payoutChacker: "Entrada: +3", payoutMatch: "Combinación: +15", payoutFever: "777 Premio: +50",
+    call: "AVISO", upperTray: "Bandeja sup.", borrow: "Comprar", returnBtn: "Volver", lowerTray: "Bandeja inf.",
+    closingMsg: "¡Gracias por su visita! Esperamos verle de nuevo."
+  },
+  fr: {
+    launchBtn: "Lancer Bille (Espace / Clic)",
+    stopLeft: "G", stopMid: "C", stopRight: "D",
+    dataLamp: "PANNEAU", visitor: "VISITEUR", jackpot: "JACKPOT", balls: "BILLES", lastWin: "DERNIER",
+    payoutTitle: "[GAINS]", payoutChacker: "Entrée: +3", payoutMatch: "Aligné: +15", payoutFever: "777 Jackpot: +50",
+    call: "APPEL", upperTray: "Plateau sup.", borrow: "Acheter", returnBtn: "Retour", lowerTray: "Plateau inf.",
+    closingMsg: "Merci de votre visite! Au plaisir de vous revoir."
+  },
+  ko: {
+    launchBtn: "구슬 발사 (스페이스 / 클릭)",
+    stopLeft: "좌", stopMid: "중", stopRight: "우",
+    dataLamp: "데이터 램프", visitor: "방문자", jackpot: "대박", balls: "소지구슬", lastWin: "최근획득",
+    payoutTitle: "【배당표】", payoutChacker: "입상구: +3", payoutMatch: "도안일치: +15", payoutFever: "777 대박: +50",
+    call: "호출", upperTray: "상단 트레이", borrow: "구슬대여", returnBtn: "반환", lowerTray: "하단 트레이",
+    closingMsg: "방문해 주셔서 감사합니다. 또 오시기를 기다리겠습니다."
+  },
+  hi: {
+    launchBtn: "गेंद छोड़ें (स्पेस / क्लिक)",
+    stopLeft: "बायें", stopMid: "मध्य", stopRight: "दायें",
+    dataLamp: "डेटा लैम्प", visitor: "आगंतुक", jackpot: "जैकपॉट", balls: "गेंदे", lastWin: "अंतिम जीत",
+    payoutTitle: "[भुगतान]", payoutChacker: "प्रविष्टि: +3", payoutMatch: "मैच: +15", payoutFever: "777 जैकपॉट: +50",
+    call: "कॉल", upperTray: "ऊपरी ट्रे", borrow: "गेंदें लें", returnBtn: "वापस", lowerTray: "निचली ट्रे",
+    closingMsg: "पधारने के लिए धन्यवाद! हम पुनः आपके आगमन की प्रतीक्षा करेंगे।"
+  },
+  ar: {
+    launchBtn: "إطلاق الكرة (مسافة / انقر)",
+    stopLeft: "يسار", stopMid: "وسط", stopRight: "يمين",
+    dataLamp: "لوحة البيانات", visitor: "زائر", jackpot: "الجائزة", balls: "الكرات", lastWin: "آخر فوز",
+    payoutTitle: "[جدول الجوائز]", payoutChacker: "دخول: +3", payoutMatch: "تطابق: +15", payoutFever: "777 الكبرى: +50",
+    call: "نداء", upperTray: "الدرج العلوي", borrow: "شراء", returnBtn: "إرجاع", lowerTray: "الدرج السفلي",
+    closingMsg: "شكرا لزيارتكم! نتطلع لرؤيتكم مرة أخرى."
+  },
+  ru: {
+    launchBtn: "Запуск шара (Пробел / Клик)",
+    stopLeft: "Л", stopMid: "Ц", stopRight: "П",
+    dataLamp: "ТАБЛО", visitor: "ВИЗИТОР", jackpot: "ДЖЕКПОТ", balls: "ШАРЫ", lastWin: "ПОСЛ.ВЫИГР",
+    payoutTitle: "[ВЫПЛАТЫ]", payoutChacker: "Вход: +3", payoutMatch: "Совпадение: +15", payoutFever: "777 Джекпот: +50",
+    call: "ВЫЗОВ", upperTray: "Верх. лоток", borrow: "Взять", returnBtn: "Возврат", lowerTray: "Нижн. лоток",
+    closingMsg: "Спасибо за визит! Будем рады видеть вас снова."
+  }
+};
+
+let currentLang = "ja";
+
+let visitorCount = parseInt(localStorage.getItem("pachinko_visitor_count") || "0", 10);
+visitorCount++;
+localStorage.setItem("pachinko_visitor_count", visitorCount.toString());
+
+let score = 100;
+let feverCount = 0;
+let lastWinScore = 0;
+let balls = [];
+let particles = [];
+let slotState = "IDLE";
+let flashTimer = 0;
+let forceJackpot = false;
+let isGameOver = false;
+
+setInterval(() => {
+  forceJackpot = true;
+}, 30000);
+
+const SYMBOLS = ["7", "🍒", "🔔", "🍉", "BAR", "💎"];
+
+let reelOffsets = [0, 0, 0];
+let reelSpeeds = [0, 0, 0];
+let reelStopping = [false, false, false];
+let reelNudgeSteps = [0, 0, 0];
+let reelTargetIndex = [0, 0, 0];
+
+let reelStrips = [
+  ["7", "🍒", "🔔", "🍉", "BAR", "💎"],
+  ["7", "💎", "BAR", "🍉", "🔔", "🍒"],
+  ["7", "🍉", "🍒", "💎", "BAR", "🔔"]
+];
+
+let slotGrid = [
+  ["7", "7", "7"],
+  ["7", "7", "7"],
+  ["7", "7", "7"]
+];
+
+let spinning = [false, false, false];
+
+const upperTraySpots = [];
+for (let i = 0; i < 120; i++) {
+  upperTraySpots.push({
+    x: 100 + (i % 24) * 11 + (Math.random() * 2 - 1),
+    y: 582 - Math.floor(i / 24) * 6.5 + (Math.random() * 2 - 1)
+  });
+}
+
+const lowerTraySpots = [];
+for (let i = 0; i < 240; i++) {
+  lowerTraySpots.push({
+    x: 90 + (i % 30) * 9.5 + (Math.random() * 2 - 1),
+    y: 642 - Math.floor(i / 30) * 5.5 + (Math.random() * 2 - 1)
+  });
+}
+
+const board = {
+  x: 75,
+  y: 110,
+  w: 400,
+  h: 420,
+  centerX: 275,
+  centerY: 270,
+  radius: 180
+};
+
+// Layout of pegs (Adjusted to deflect balls away from center chacker)
+const pegs = [];
+for (let r = 50; r <= board.radius - 20; r += 26) {
+  const count = Math.floor((2 * Math.PI * r) / 28);
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2;
+    const px = board.centerX + r * Math.cos(angle);
+    const py = board.centerY + r * Math.sin(angle);
+    if (Math.abs(px - board.centerX) > 75 || Math.abs(py - board.centerY) > 75) {
+      pegs.push({ x: px, y: py, r: 3.5 });
+    }
+  }
+}
+
+// Extra deflector pegs above chacker to reduce entry rate
+pegs.push({ x: board.centerX - 12, y: board.centerY + 95, r: 4 });
+pegs.push({ x: board.centerX + 12, y: board.centerY + 95, r: 4 });
+pegs.push({ x: board.centerX - 24, y: board.centerY + 112, r: 4 });
+pegs.push({ x: board.centerX + 24, y: board.centerY + 112, r: 4 });
+
+const windmills = [
+  { x: board.centerX - 110, y: board.centerY - 20, r: 16, angle: 0, speed: 0 },
+  { x: board.centerX + 110, y: board.centerY - 20, r: 16, angle: 0, speed: 0 }
+];
+
+// Chacker with Tulip Wings (Narrower base width)
+const chacker = {
+  x: board.centerX - 6,
+  y: board.centerY + 138,
+  w: 12,
+  h: 16,
+  isOpen: false,
+  wingAngle: 0
+};
+
+const outHole = { x: board.centerX, y: board.centerY + 185, r: 24 };
+
+// --- Closing Performance & Timer Properties ---
+const PLAY_DURATION = 10 * 60 * 1000; // 10 minutes (600,000ms)
+const CLOSING_DELAY = 10 * 1000;       // 10 seconds delay to GameOver
+let startTime = Date.now();
+let isClosingTime = false;
+let scrollTextX = 550;
+
+// Web Audio API Synth for "Hotaru no Hikari"
+let audioCtx = null;
+let musicInterval = null;
+
+function playAuldLangSyne() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Melody notes for "Hotaru no Hikari" (Freq Hz, Duration Sec)
+  const notes = [
+    {f: 261.63, d: 0.8}, {f: 349.23, d: 0.8}, {f: 349.23, d: 0.8}, {f: 349.23, d: 0.8},
+    {f: 440.00, d: 0.8}, {f: 392.00, d: 0.8}, {f: 349.23, d: 0.8}, {f: 392.00, d: 0.8},
+    {f: 440.00, d: 0.8}, {f: 349.23, d: 0.8}, {f: 349.23, d: 0.8}, {f: 440.00, d: 0.8},
+    {f: 523.25, d: 1.6}, {f: 440.00, d: 0.8}, {f: 523.25, d: 0.8}, {f: 440.00, d: 0.8},
+    {f: 440.00, d: 0.8}, {f: 349.23, d: 0.8}, {f: 392.00, d: 0.8}, {f: 349.23, d: 0.8},
+    {f: 293.66, d: 0.8}, {f: 261.63, d: 0.8}, {f: 293.66, d: 0.8}, {f: 349.23, d: 0.8},
+    {f: 293.66, d: 0.8}, {f: 261.63, d: 0.8}, {f: 261.63, d: 0.8}, {f: 293.66, d: 0.8},
+    {f: 349.23, d: 2.4}
+  ];
+
+  let step = 0;
+  function playNext() {
+    if (isGameOver) return;
+    const n = notes[step % notes.length];
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(n.f, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + n.d - 0.05);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + n.d);
+
+    step++;
+    musicInterval = setTimeout(playNext, n.d * 1000);
+  }
+  playNext();
+}
+
+function launchBall() {
+  if (score <= 0 || isGameOver) return;
+  score--;
+
+  const power = 17.0 + (Math.random() * 1.0 - 0.5);
+
+  balls.push({
+    x: board.centerX + board.radius - 5,
+    y: board.centerY + 100,
+    vx: 0,
+    vy: -power,
+    r: 5.5,
+    state: "LAUNCHING"
+  });
+}
+
+function borrowBalls() {
+  if (isGameOver) return;
+  score += 100;
+  createParticles(382, 570, 20, "#0088ff");
+}
+
+function triggerSlot() {
+  if (slotState === "SPINNING" || spinning.some(s => s)) return;
+  slotState = "SPINNING";
+  for (let c = 0; c < 3; c++) {
+    spinning[c] = true;
+    reelStopping[c] = false;
+    reelSpeeds[c] = 4 + c * 0.8;
+    reelNudgeSteps[c] = 0;
+  }
+  updateStopButtons();
+}
+
+function updateStopButtons() {
+  document.getElementById("stopCol0").disabled = !spinning[0] || reelStopping[0] || isGameOver;
+  document.getElementById("stopCol1").disabled = !spinning[1] || reelStopping[1] || isGameOver;
+  document.getElementById("stopCol2").disabled = !spinning[2] || reelStopping[2] || isGameOver;
+}
+
+function stopReel(col) {
+  if (!spinning[col] || reelStopping[col] || isGameOver) return;
+  reelStopping[col] = true;
+
+  if (forceJackpot) {
+    reelNudgeSteps[col] = 1 + Math.floor(Math.random() * 2);
+    let targetIdx = reelStrips[col].indexOf("7");
+    let calculatedIdx = (targetIdx - reelNudgeSteps[col] + SYMBOLS.length * 10) % SYMBOLS.length;
+    reelTargetIndex[col] = calculatedIdx;
+  } else {
+    reelNudgeSteps[col] = Math.random() < 0.6 ? Math.floor(Math.random() * 3) + 1 : 0;
+    reelTargetIndex[col] = Math.floor(Math.random() * SYMBOLS.length);
+  }
+
+  updateStopButtons();
+}
+
+function checkSlotResult() {
+  const centerLine = [slotGrid[1][0], slotGrid[1][1], slotGrid[1][2]];
+  const isFever = centerLine.every(s => s === "7");
+  const isWin = centerLine[0] === centerLine[1] && centerLine[1] === centerLine[2];
+
+  if (isFever) {
+    slotState = "FEVER";
+    score += 50;
+    lastWinScore = 50;
+    feverCount++;
+    chacker.isOpen = true;
+    createParticles(board.centerX, board.centerY, 60, "#ff0055");
+    forceJackpot = false;
+  } else if (isWin) {
+    slotState = "WIN";
+    score += 15;
+    lastWinScore = 15;
+    chacker.isOpen = true;
+    createParticles(board.centerX, board.centerY, 25, "#00ffff");
+  } else {
+    slotState = "IDLE";
+  }
+}
+
+function createParticles(x, y, count, color) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: x, y: y,
+      vx: (Math.random() - 0.5) * 10,
+      vy: (Math.random() - 0.5) * 10,
+      life: 30 + Math.random() * 20,
+      color: color
+    });
+  }
+}
+
+function update() {
+  if (isGameOver) return;
+
+  flashTimer++;
+
+  // Timer check for closing performance (10 minutes)
+  const elapsed = Date.now() - startTime;
+  if (elapsed >= PLAY_DURATION && !isClosingTime) {
+    isClosingTime = true;
+    playAuldLangSyne();
+
+    // Trigger Game Over screen 10 seconds after closing notice begins
+    setTimeout(() => {
+      isGameOver = true;
+      document.getElementById("gameOverOverlay").style.display = "flex";
+      document.getElementById("launchBtn").disabled = true;
+      updateStopButtons();
+    }, CLOSING_DELAY);
+  }
+
+  // Scroll closing message from right to left
+  if (isClosingTime) {
+    scrollTextX -= 2.5;
+    if (scrollTextX < -500) scrollTextX = 550;
+  }
+
+  windmills.forEach(w => {
+    w.angle += w.speed;
+    w.speed *= 0.96;
+  });
+
+  const targetWingAngle = chacker.isOpen ? Math.PI / 3.2 : 0;
+  chacker.wingAngle += (targetWingAngle - chacker.wingAngle) * 0.15;
+
+  const cellSize = 130 / 3;
+  for (let c = 0; c < 3; c++) {
+    if (spinning[c]) {
+      reelOffsets[c] += reelSpeeds[c];
+
+      if (reelStopping[c]) {
+        reelSpeeds[c] = Math.max(0.8, reelSpeeds[c] * 0.94);
+        
+        let targetPixelOffset = (reelTargetIndex[c] + reelNudgeSteps[c]) * cellSize;
+        if (reelSpeeds[c] <= 1.2 && Math.abs((reelOffsets[c] % (cellSize * SYMBOLS.length)) - (targetPixelOffset % (cellSize * SYMBOLS.length))) < 4) {
+          spinning[c] = false;
+          reelStopping[c] = false;
+
+          let finalCenterIdx = (reelTargetIndex[c] + reelNudgeSteps[c]) % SYMBOLS.length;
+          slotGrid[0][c] = reelStrips[c][(finalCenterIdx - 1 + SYMBOLS.length) % SYMBOLS.length];
+          slotGrid[1][c] = reelStrips[c][finalCenterIdx];
+          slotGrid[2][c] = reelStrips[c][(finalCenterIdx + 1) % SYMBOLS.length];
+
+          updateStopButtons();
+
+          if (!spinning.some(s => s)) {
+            checkSlotResult();
+          }
+        }
+      }
+
+      let currentIdx = Math.floor(reelOffsets[c] / cellSize) % SYMBOLS.length;
+      slotGrid[0][c] = reelStrips[c][(currentIdx - 1 + SYMBOLS.length) % SYMBOLS.length];
+      slotGrid[1][c] = reelStrips[c][currentIdx];
+      slotGrid[2][c] = reelStrips[c][(currentIdx + 1) % SYMBOLS.length];
+    }
+  }
+
+  for (let i = balls.length - 1; i >= 0; i--) {
+    let b = balls[i];
+
+    if (b.state === "LAUNCHING") {
+      b.y += b.vy;
+      b.vy += 0.35;
+
+      b.x = board.centerX + Math.sqrt(Math.max(0, Math.pow(board.radius - 6, 2) - Math.pow(b.y - board.centerY, 2)));
+
+      if (b.y <= board.centerY - board.radius + 10 || b.vy >= -0.5) {
+        b.state = "FALLING";
+        b.vx = -Math.random() * 3 - 3.5;
+        b.vy = Math.random() * 2;
+      }
+    } else {
+      b.vy += 0.22;
+      b.x += b.vx;
+      b.y += b.vy;
+
+      const dx = b.x - board.centerX;
+      const dy = b.y - board.centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > board.radius - b.r && b.y < board.centerY + board.radius - 20) {
+        const angle = Math.atan2(dy, dx);
+        b.x = board.centerX + (board.radius - b.r) * Math.cos(angle);
+        b.y = board.centerY + (board.radius - b.r) * Math.sin(angle);
+        b.vx *= -0.55;
+        b.vy *= -0.55;
+      }
+
+      windmills.forEach(w => {
+        const wdx = b.x - w.x;
+        const wdy = b.y - w.y;
+        const wdist = Math.sqrt(wdx * wdx + wdy * wdy);
+        if (wdist < b.r + w.r) {
+          const angle = Math.atan2(wdy, wdx);
+          b.x = w.x + (b.r + w.r) * Math.cos(angle);
+          b.y = w.y + (b.r + w.r) * Math.sin(angle);
+          b.vx = Math.cos(angle) * 3.5 + (Math.random() - 0.5);
+          b.vy = Math.sin(angle) * 3.5 + (Math.random() - 0.5);
+          w.speed += (Math.random() > 0.5 ? 1 : -1) * 0.25;
+        }
+      });
+
+      pegs.forEach(p => {
+        const pdx = b.x - p.x;
+        const pdy = b.y - p.y;
+        const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+        if (pdist < b.r + p.r) {
+          const angle = Math.atan2(pdy, pdx);
+          b.x = p.x + (b.r + p.r) * Math.cos(angle);
+          b.y = p.y + (b.r + p.r) * Math.sin(angle);
+          b.vx = Math.cos(angle) * 2.6 + (Math.random() - 0.5);
+          b.vy = Math.sin(angle) * 2.6 + (Math.random() - 0.5);
+        }
+      });
+
+      // Strict entry detection for Tulip Chacker
+      const effectiveWidth = chacker.isOpen ? chacker.w + 16 : chacker.w;
+      const effectiveX = chacker.x - (effectiveWidth - chacker.w) / 2;
+
+      if (b.x > effectiveX && b.x < effectiveX + effectiveWidth &&
+          b.y > chacker.y && b.y < chacker.y + chacker.h) {
+        score += 3;
+        lastWinScore = 3;
+        if (chacker.isOpen) chacker.isOpen = false;
+        triggerSlot();
+        createParticles(b.x, b.y, 8, "#ffff00");
+        balls.splice(i, 1);
+        continue;
+      }
+
+      if (b.y > board.centerY + 120) {
+        const targetX = outHole.x;
+        b.vx += (targetX - b.x) * 0.08;
+      }
+
+      const odx = b.x - outHole.x;
+      const ody = b.y - outHole.y;
+      const odist = Math.sqrt(odx * odx + ody * ody);
+
+      if (odist < outHole.r + 20) {
+        b.vx += (outHole.x - b.x) * 0.2;
+        b.vy += (outHole.y - b.y) * 0.2;
+      }
+
+      if (odist < outHole.r) {
+        balls.splice(i, 1);
+        continue;
+      }
+
+      if (b.y > 520) {
+        balls.splice(i, 1);
+      }
+    }
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    let p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function draw() {
+  const txt = i18n[currentLang];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // --- 1. Data Lamp ---
+  ctx.fillStyle = "#111118";
+  ctx.fillRect(50, 10, 450, 75);
+  ctx.strokeStyle = "#333344";
+  ctx.strokeRect(50, 10, 450, 75);
+
+  ctx.fillStyle = "#00ffcc";
+  ctx.font = "bold 10px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(txt.dataLamp, 60, 26);
+
+  ctx.fillStyle = "#00d2ff";
+  ctx.font = "bold 10px sans-serif";
+  ctx.fillText(`${txt.visitor}: ${visitorCount}`, 155, 26);
+
+  ctx.fillStyle = "#ff0055";
+  ctx.font = "bold 14px sans-serif";
+  ctx.fillText(`${txt.jackpot}: ${feverCount}`, 60, 48);
+
+  ctx.fillStyle = "#ffff00";
+  ctx.font = "bold 14px sans-serif";
+  ctx.fillText(`${txt.balls}: ${score}`, 155, 48);
+
+  ctx.fillStyle = "#00ffcc";
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillText(`${txt.lastWin}: +${lastWinScore}`, 60, 70);
+
+  ctx.fillStyle = "#1a1a28";
+  ctx.fillRect(265, 16, 145, 62);
+  ctx.strokeStyle = "#444466";
+  ctx.strokeRect(265, 16, 145, 62);
+
+  ctx.fillStyle = "#ffcc00";
+  ctx.font = "bold 10px sans-serif";
+  ctx.fillText(txt.payoutTitle, 270, 29);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "9px sans-serif";
+  ctx.fillText(txt.payoutChacker, 270, 42);
+  ctx.fillText(txt.payoutMatch, 270, 54);
+  ctx.fillText(txt.payoutFever, 270, 66);
+
+  ctx.fillStyle = "#555577";
+  ctx.fillRect(415, 25, 70, 45);
+  ctx.fillStyle = "#fff";
+  ctx.font = "12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(txt.call, 450, 52);
+
+  // --- Scrolling Closing Ticker Display ---
+  if (isClosingTime) {
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(50, 65, 450, 20);
+    ctx.fillStyle = "#ff0055";
+    ctx.font = "bold 13px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(txt.closingMsg, scrollTextX, 80);
+  }
+
+  // --- 2. Side Cabinets & Main Board ---
+  ctx.fillStyle = "#22222e";
+  ctx.fillRect(20, 95, 30, 470);
+  ctx.fillRect(500, 95, 30, 470);
+
+  ctx.fillStyle = "#ffcc00";
+  ctx.font = "bold 11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("CARD", 22, 120);
+  ctx.fillText("SAND", 22, 135);
+
+  ctx.fillStyle = "#0d0d18";
+  ctx.fillRect(board.x, board.y, board.w, board.h);
+
+  ctx.beginPath();
+  ctx.arc(board.centerX, board.centerY, board.radius, 0, Math.PI * 2);
+  ctx.strokeStyle = "#ff0077";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  ctx.fillStyle = "#e6c200";
+  pegs.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  windmills.forEach(w => {
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    ctx.rotate(w.angle);
+
+    ctx.fillStyle = "#ffaa00";
+    for (let b = 0; b < 4; b++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.fillRect(-2, -w.r, 4, w.r - 2);
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // --- Enhanced High-Visibility Tulip & Chacker ---
+  ctx.save();
+  ctx.translate(chacker.x + chacker.w / 2, chacker.y + chacker.h / 2);
+
+  // Outer Glowing Outline for High Visibility
+  ctx.strokeStyle = "#ffff00";
+  ctx.lineWidth = 2;
+
+  // Left Petal
+  ctx.save();
+  ctx.rotate(-chacker.wingAngle);
+  ctx.fillStyle = "#ff0077";
+  ctx.beginPath();
+  ctx.moveTo(0, chacker.h / 2);
+  ctx.quadraticCurveTo(-18, 0, -22, -chacker.h);
+  ctx.quadraticCurveTo(-10, -chacker.h / 2, 0, chacker.h / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Right Petal
+  ctx.save();
+  ctx.rotate(chacker.wingAngle);
+  ctx.fillStyle = "#ff0077";
+  ctx.beginPath();
+  ctx.moveTo(0, chacker.h / 2);
+  ctx.quadraticCurveTo(18, 0, 22, -chacker.h);
+  ctx.quadraticCurveTo(10, -chacker.h / 2, 0, chacker.h / 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Center Entry Box
+  ctx.fillStyle = "#ffcc00";
+  ctx.fillRect(-chacker.w / 2, -chacker.h / 2, chacker.w, chacker.h);
+  ctx.strokeStyle = "#ffffff";
+  ctx.strokeRect(-chacker.w / 2, -chacker.h / 2, chacker.w, chacker.h);
+  ctx.restore();
+
+  // OUT hole
+  ctx.beginPath();
+  ctx.arc(outHole.x, outHole.y, outHole.r, 0, Math.PI * 2);
+  ctx.fillStyle = "#000000";
+  ctx.fill();
+  ctx.strokeStyle = "#444466";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = "#8888aa";
+  ctx.font = "bold 10px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("OUT", outHole.x, outHole.y + 3);
+
+  ctx.fillStyle = "#e0e0e0";
+  balls.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // --- 3. 3x3 LCD Slot Machine Screen ---
+  const slotSize = 130;
+  const startX = board.centerX - slotSize / 2;
+  const startY = board.centerY - slotSize / 2;
+  const cellSize = slotSize / 3;
+
+  ctx.fillStyle = "#030308";
+  ctx.fillRect(startX, startY, slotSize, slotSize);
+
+  let borderColor = "#00d2ff";
+  if (slotState === "WIN") borderColor = "#ffff00";
+  if (slotState === "FEVER") borderColor = (flashTimer % 8 < 4) ? "#ff0055" : "#ffffff";
+
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(startX, startY, slotSize, slotSize);
+
+  ctx.font = "20px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const cx = startX + c * cellSize;
+      const cy = startY + r * cellSize;
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.strokeRect(cx, cy, cellSize, cellSize);
+
+      ctx.fillStyle = spinning[c] ? "#8888aa" : ((slotState === "FEVER" && flashTimer % 6 < 3) ? "#ffff00" : "#ffffff");
+      ctx.fillText(slotGrid[r][c], cx + cellSize / 2, cy + cellSize / 2);
+    }
+  }
+
+  // --- 4. 3D Upper & Lower Trays ---
+  const uGrad = ctx.createLinearGradient(75, 540, 75, 595);
+  uGrad.addColorStop(0, "#4a4a5e");
+  uGrad.addColorStop(0.2, "#2a2a38");
+  uGrad.addColorStop(0.8, "#1a1a24");
+  uGrad.addColorStop(1, "#0d0d12");
+
+  ctx.fillStyle = uGrad;
+  ctx.beginPath();
+  ctx.moveTo(70, 545);
+  ctx.lineTo(480, 545);
+  ctx.lineTo(470, 595);
+  ctx.lineTo(80, 595);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#666688";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const upperBallCount = Math.min(120, score);
+  for (let i = 0; i < upperBallCount; i++) {
+    const spot = upperTraySpots[i];
+    const bGrad = ctx.createRadialGradient(spot.x - 1, spot.y - 1, 0.5, spot.x, spot.y, 4.5);
+    bGrad.addColorStop(0, "#ffffff");
+    bGrad.addColorStop(0.4, "#cccccc");
+    bGrad.addColorStop(1, "#444444");
+
+    ctx.fillStyle = bGrad;
+    ctx.beginPath();
+    ctx.arc(spot.x, spot.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(txt.upperTray, 85, 560);
+
+  ctx.fillStyle = "#0088ff"; ctx.fillRect(360, 555, 45, 30);
+  ctx.fillStyle = "#888899"; ctx.fillRect(415, 555, 45, 30);
+  ctx.fillStyle = "#fff";
+  ctx.font = "9px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(txt.borrow, 382, 573);
+  ctx.fillText(txt.returnBtn, 437, 573);
+
+  const lGrad = ctx.createLinearGradient(75, 600, 75, 650);
+  lGrad.addColorStop(0, "#3a3a4c");
+  lGrad.addColorStop(0.3, "#222230");
+  lGrad.addColorStop(1, "#0a0a10");
+
+  ctx.fillStyle = lGrad;
+  ctx.beginPath();
+  ctx.moveTo(75, 605);
+  ctx.lineTo(385, 605);
+  ctx.lineTo(375, 650);
+  ctx.lineTo(85, 650);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#555577";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const lowerBallCount = Math.min(240, Math.max(0, score - 100));
+  for (let i = 0; i < lowerBallCount; i++) {
+    const spot = lowerTraySpots[i];
+    const bGrad = ctx.createRadialGradient(spot.x - 1, spot.y - 1, 0.5, spot.x, spot.y, 4);
+    bGrad.addColorStop(0, "#ffffff");
+    bGrad.addColorStop(0.4, "#dddddd");
+    bGrad.addColorStop(1, "#333333");
+
+    ctx.fillStyle = bGrad;
+    ctx.beginPath();
+    ctx.arc(spot.x, spot.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#aaa";
+  ctx.font = "bold 11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(txt.lowerTray, 90, 620);
+
+  ctx.beginPath();
+  ctx.arc(435, 627, 26, 0, Math.PI * 2);
+  ctx.fillStyle = "#ff3300";
+  ctx.fill();
+  ctx.strokeStyle = "#661100";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  particles.forEach(p => {
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, 4, 4);
+  });
+}
+
+function updateLanguageUI() {
+  const txt = i18n[currentLang];
+  document.getElementById("launchBtn").innerText = txt.launchBtn;
+  document.getElementById("stopCol0").innerText = txt.stopLeft;
+  document.getElementById("stopCol1").innerText = txt.stopMid;
+  document.getElementById("stopCol2").innerText = txt.stopRight;
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+const launchBtn = document.getElementById("launchBtn");
+const langSelect = document.getElementById("langSelect");
+
+langSelect.addEventListener("change", (e) => {
+  currentLang = e.target.value;
+  updateLanguageUI();
+});
+
+launchBtn.addEventListener("click", () => { launchBall(); });
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !e.repeat) launchBall();
+});
+
+document.getElementById("stopCol0").addEventListener("click", () => stopReel(0));
+document.getElementById("stopCol1").addEventListener("click", () => stopReel(1));
+document.getElementById("stopCol2").addEventListener("click", () => stopReel(2));
+
+canvas.addEventListener("click", (e) => {
+  if (isGameOver) return;
+  const rect = canvas.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  if (clickX >= 360 && clickX <= 405 && clickY >= 555 && clickY <= 585) {
+    borrowBalls();
+  }
+});
+
+updateLanguageUI();
+gameLoop();
+</script>
+</body>
+</html>
